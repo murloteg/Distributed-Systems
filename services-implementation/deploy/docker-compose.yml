@@ -1,0 +1,22 @@
+version: '3.5'
+
+services:
+    manager-app:
+        build:
+            context: ../manager
+            dockerfile: Dockerfile
+        container_name: manager-container
+        environment:
+            - PORT=${PORT}
+        ports:
+            - '3000:3000'
+
+    worker-app:
+        build:
+            context: ../worker
+            dockerfile: Dockerfile
+        container_name: worker-container
+        environment:
+            - PORT=${PORT}
+        ports:
+            - '3001:3001'
