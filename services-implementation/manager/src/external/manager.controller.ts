@@ -7,7 +7,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { CrackResultDto } from './dto/api/CrackResultDto';
+import { CrackHashManagerResponse } from './dto/api/CrackHashManagerResponse';
 import { PostCrackDto } from './dto/api/PostCrackDto';
 import { ResponseCrackDto } from './dto/api/ResponseCrackDto';
 import { ExternalManagerService } from './manager.service';
@@ -24,7 +24,9 @@ export class ExternalManagerController {
 
   @Get('status')
   @HttpCode(HttpStatus.OK)
-  getCrackResult(@Query('requestId') requestId: string): CrackResultDto {
+  getCrackResult(
+    @Query('requestId') requestId: string,
+  ): CrackHashManagerResponse {
     return this.managerService.getCrackRequestStatus(requestId);
   }
 }

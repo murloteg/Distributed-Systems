@@ -5,4 +5,5 @@ export class CrackHashManagerRequest {
   hash: string;
   maxLength: number;
   alphabet: string;
+  workersCount: number;
 }

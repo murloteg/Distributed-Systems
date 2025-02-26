@@ -1,4 +1,4 @@
-import { Body, Controller, Patch } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Patch } from '@nestjs/common';
 import { CrackWorkerResponse } from 'src/external/dto/api/CrackWorkerResponse';
 import { ExternalManagerService } from 'src/external/manager.service';
 
@@ -7,6 +7,7 @@ export class InternalManagerController {
   constructor(private readonly managerService: ExternalManagerService) {}
 
   @Patch()
+  @HttpCode(HttpStatus.NO_CONTENT)
   updateInfoAboutCrackRequest(
     @Body() crackWorkerResponse: CrackWorkerResponse,
   ) {

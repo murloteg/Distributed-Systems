@@ -1,0 +1,20 @@
+meta {
+  name: Update Crack Info
+  type: http
+  seq: 3
+}
+
+patch {
+  url: http://localhost:3000/internal/api/v1/manager/hash/crack/request
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "requestId": "500dccf1-a000-44ae-a009-103cee1a14d4",
+    "partNumber": 0,
+    "answers": ["abcd"]
+  }
+  
+}

@@ -10,6 +10,8 @@ services:
             - PORT=${PORT}
         ports:
             - '3000:3000'
+        networks:
+            - services-network
 
     worker-app:
         build:
@@ -20,3 +22,9 @@ services:
             - PORT=${PORT}
         ports:
             - '3001:3001'
+        networks:
+            - services-network
+
+networks:
+    services-network:
+        driver: bridge
