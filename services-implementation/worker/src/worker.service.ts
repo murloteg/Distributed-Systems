@@ -3,6 +3,7 @@ import axios, { AxiosResponse } from 'axios';
 import { md5 } from 'js-md5';
 import { CrackHashManagerRequest } from './dto/CrackHashManagerRequest';
 import { UpdateManagerInfoDto } from './dto/UpdateManagerInfoDto';
+
 @Injectable()
 export class WorkerService {
   private findWordsCountWithPreviousLength(
@@ -64,7 +65,8 @@ export class WorkerService {
       )
       .then((response: AxiosResponse) => {
         console.log(
-          `Worker with ID: ${partNumber} sent crack result (requestId = ${requestId}) to manager`,
+          `Worker with ID: ${partNumber} sent crack result` +
+            ` (requestId = ${requestId}) to manager`,
         );
       })
       .catch((error) => {
@@ -74,7 +76,8 @@ export class WorkerService {
 
   public crackHash(crackHashRequest: CrackHashManagerRequest) {
     console.log(
-      `Worker with ID: ${crackHashRequest.partNumber} got request (requestId = ${crackHashRequest.requestId}) from manager`,
+      `Worker with ID: ${crackHashRequest.partNumber} got request` +
+        ` (requestId = ${crackHashRequest.requestId}) from manager`,
     );
     const workerId = crackHashRequest.partNumber;
     const wordsCountPerWorker = Math.floor(

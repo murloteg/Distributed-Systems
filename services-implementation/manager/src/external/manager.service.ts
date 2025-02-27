@@ -25,7 +25,8 @@ export class ExternalManagerService {
         requestToWorker,
       );
       console.log(
-        `Successfully sent data (requestId = ${requestToWorker.requestId}) to worker with ID: ${requestToWorker.partNumber}`,
+        `Successfully sent data (requestId = ${requestToWorker.requestId})` +
+          ` to worker with ID: ${requestToWorker.partNumber}`,
       );
     } catch (error) {
       console.error(error);
@@ -33,6 +34,7 @@ export class ExternalManagerService {
   }
 
   handleRequestToCrackHash(postCrackDto: PostCrackDto): ResponseCrackDto {
+    console.log(`Manager got request to crack hash from client`);
     const requestId = uuidv4();
     let totalWords = 0;
     for (let power = 1; power <= postCrackDto.maxLength; ++power) {
@@ -69,7 +71,8 @@ export class ExternalManagerService {
         );
         if (!workerResult?.data) {
           console.error(
-            `Worker with ID: ${partNumber} failed task (requestId = ${requestId})`,
+            `Worker with ID: ${partNumber} failed task` +
+              ` (requestId = ${requestId})`,
           );
           currentRequest!.status = 'ERROR';
         }
@@ -116,7 +119,8 @@ export class ExternalManagerService {
       workerResult.data = crackWorkerResponse.answers;
     }
     console.log(
-      `Got answers (requestId = ${crackWorkerResponse.requestId}) from worker with ID: ${crackWorkerResponse.partNumber}`,
+      `Got answers (requestId = ${crackWorkerResponse.requestId})` +
+        ` from worker with ID: ${crackWorkerResponse.partNumber}`,
     );
   }
 }
