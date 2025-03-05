@@ -29,4 +29,10 @@ export class ExternalManagerController {
   ): CrackHashManagerResponse {
     return this.managerService.getCrackRequestStatus(requestId);
   }
+
+  @Get('status/first')
+  @HttpCode(HttpStatus.OK)
+  getFirstCrackResult(): CrackHashManagerResponse {
+    return this.managerService.getFirstCrackRequestStatus();
+  }
 }

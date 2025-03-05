@@ -107,6 +107,27 @@ export class ExternalManagerService {
     };
   }
 
+  getFirstCrackRequestStatus(): CrackHashManagerResponse {
+    if (this.clientRequests.length === 0) {
+      throw new HttpException('No client requests found', HttpStatus.NOT_FOUND);
+    }
+    const crackResultEntity = this.clientRequests[0];
+    const crackResults: string[] = [];
+    let allWorkersFinished = true;
+    crackResultEntity.crackResultDto.forEach((value) => {
+      if (value.data) {
+        crackResults.push(...value.data);
+      } else {
+        allWorkersFinished = false;
+      }
+    });
+
+    return {
+      status: allWorkersFinished ? 'READY' : crackResultEntity.status,
+      data: crackResultEntity.status === 'ERROR' ? null : crackResults,
+    };
+  }
+
   updateInfoAboutCrackRequest(crackWorkerResponse: CrackWorkerResponse): void {
     const clientRequest = this.clientRequests.find(
       (value) => value.requestId === crackWorkerResponse.requestId,
