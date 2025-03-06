@@ -3,7 +3,7 @@ import { setDefaultResultOrder } from 'dns';
 import { ManagerModule } from './app.module';
 
 setDefaultResultOrder('ipv4first');
-process.env['WORKERS_COUNT'] = '1';
+process.env['WORKERS_COUNT'] = '3';
 process.env.PORT = '3000';
 
 async function bootstrap() {

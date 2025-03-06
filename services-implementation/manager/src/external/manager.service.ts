@@ -18,10 +18,13 @@ export class ExternalManagerService {
   );
   private readonly PROCESSING_TIMEOUT_IN_MSEC = 50000;
 
-  private async sendRequestToWorker(requestToWorker: CrackHashManagerRequest) {
+  private async sendRequestToWorker(
+    requestToWorker: CrackHashManagerRequest,
+    workerId: number,
+  ) {
     try {
       await axios.post(
-        `http://worker-container:3001/internal/api/v1/worker/hash/crack/task`,
+        `http://worker-container-${workerId}:3001/internal/api/v1/worker/hash/crack/task`,
         requestToWorker,
       );
       console.log(
@@ -64,7 +67,7 @@ export class ExternalManagerService {
         alphabet: this.alphabet,
         workersCount: this.workersCount,
       };
-      void this.sendRequestToWorker(requestToWorker);
+      void this.sendRequestToWorker(requestToWorker, partNumber);
       const timerId = setTimeout(() => {
         const workerResult = currentRequest?.crackResultDto.find(
           (value) => value.partNumber === partNumber,
@@ -141,7 +144,8 @@ export class ExternalManagerService {
     }
     console.log(
       `Got answers (requestId = ${crackWorkerResponse.requestId})` +
-        ` from worker with ID: ${crackWorkerResponse.partNumber}`,
+        ` from worker with ID: ${crackWorkerResponse.partNumber}\n` +
+        `Answers: [${crackWorkerResponse.answers.toString()}]\n`,
     );
   }
 

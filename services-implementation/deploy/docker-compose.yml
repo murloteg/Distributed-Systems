@@ -13,15 +13,39 @@ services:
         networks:
             - services-network
 
-    worker-app:
+    worker-app-0:
         build:
             context: ../worker
             dockerfile: Dockerfile
-        container_name: worker-container
+        container_name: worker-container-0
         environment:
             - PORT=${PORT}
         ports:
             - '3001:3001'
+        networks:
+            - services-network
+
+    worker-app-1:
+        build:
+            context: ../worker
+            dockerfile: Dockerfile
+        container_name: worker-container-1
+        environment:
+            - PORT=${PORT}
+        ports:
+            - '3002:3001'
+        networks:
+            - services-network
+
+    worker-app-2:
+        build:
+            context: ../worker
+            dockerfile: Dockerfile
+        container_name: worker-container-2
+        environment:
+            - PORT=${PORT}
+        ports:
+            - '3003:3001'
         networks:
             - services-network
 
