@@ -16,7 +16,7 @@ export class ExternalManagerService {
     process.env['WORKERS_COUNT'] ?? '1',
     10,
   );
-  private readonly PROCESSING_TIMEOUT_IN_MSEC = 50000;
+  private readonly PROCESSING_TIMEOUT_IN_MSEC = 120000;
 
   private async sendRequestToWorker(
     requestToWorker: CrackHashManagerRequest,
