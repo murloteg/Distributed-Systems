@@ -144,4 +144,8 @@ export class ExternalManagerService {
         ` from worker with ID: ${crackWorkerResponse.partNumber}`,
     );
   }
+
+  clearTaskQueue(): void {
+    this.clientRequests.splice(0, this.clientRequests.length);
+  }
 }

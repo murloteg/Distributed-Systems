@@ -4,21 +4,19 @@ class ViewController: NSViewController, NSTouchBarDelegate {
     var progressItem: NSCustomTouchBarItem?
     var slider: NSSlider?
     var backgroundView: NSVisualEffectView?
+    var progressTimer: Timer?
+    var statusCheckTimer: Timer?
 
     override func viewDidLoad() {
         super.viewDidLoad()
         self.touchBar = makeTouchBar()
-        
     }
     
     override func viewDidAppear() {
         super.viewDidAppear()
         self.view.window?.makeFirstResponder(self)
         self.touchBar = self.makeTouchBar()
-
-        DispatchQueue.main.asyncAfter(deadline: .now()) {
-            self.checkStatus()
-        }
+        startCheckingStatus()
     }
 
     override func makeTouchBar() -> NSTouchBar? {
@@ -54,23 +52,21 @@ class ViewController: NSViewController, NSTouchBarDelegate {
         return progressItem
     }
 
+    func startCheckingStatus() {
+        statusCheckTimer?.invalidate()
+        statusCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            self.checkStatus()
+        }
+        RunLoop.main.add(statusCheckTimer!, forMode: .common)
+    }
+
     func checkStatus() {
         guard let url = URL(string: "http://localhost:3000/api/v1/hash/status/first") else { return }
         
         let task = URLSession.shared.dataTask(with: url) { data, response, error in
-            guard let data = data, let httpResponse = response as? HTTPURLResponse else {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                    self.checkStatus()
-                }
-                return
-            }
+            guard let data = data, let httpResponse = response as? HTTPURLResponse else { return }
 
-            if httpResponse.statusCode == 404 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                    self.checkStatus()
-                }
-                return
-            }
+            if httpResponse.statusCode == 404 { return }
 
             do {
                 if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
@@ -92,16 +88,16 @@ class ViewController: NSViewController, NSTouchBarDelegate {
             print("Waiting result for first task...")
             backgroundView?.layer?.backgroundColor = NSColor.yellow.cgColor
             graduallyIncreaseProgress(to: 80)
-            break;
         case "READY":
             print("Successful first task execution")
             backgroundView?.layer?.backgroundColor = NSColor.green.cgColor
             slider?.doubleValue = 100
-            break;
+            statusCheckTimer?.invalidate()
         case "ERROR":
             print("Failed first task execution")
             backgroundView?.layer?.backgroundColor = NSColor.red.cgColor
-            break;
+            slider?.doubleValue = 0
+            statusCheckTimer?.invalidate()
         default:
             break
         }
@@ -111,20 +107,17 @@ class ViewController: NSViewController, NSTouchBarDelegate {
         guard let slider = slider else { return }
         
         let increment = 2.0
-        let interval = 0.2
+        let interval = 0.1
         
-        func animateProgress() {
+        progressTimer?.invalidate()
+        progressTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { timer in
             if slider.doubleValue < targetValue {
                 slider.doubleValue += increment
-                DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
-                    animateProgress()
-                }
+            } else {
+                timer.invalidate()
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            self.checkStatus()
-        }
-        animateProgress()
+        RunLoop.main.add(progressTimer!, forMode: .common)
     }
 }
 

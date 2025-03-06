@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -34,5 +35,11 @@ export class ExternalManagerController {
   @HttpCode(HttpStatus.OK)
   getFirstCrackResult(): CrackHashManagerResponse {
     return this.managerService.getFirstCrackRequestStatus();
+  }
+
+  @Delete('clear/queue')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  clearTaskQueue(): void {
+    this.managerService.clearTaskQueue();
   }
 }
