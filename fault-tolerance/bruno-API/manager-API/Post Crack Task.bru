@@ -1,0 +1,19 @@
+meta {
+  name: Post Crack Task
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://localhost:3000/api/v1/hash/crack
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "hash": "e2fc714c4727ee9395f324cd2e7f331f",
+    "maxLength": 5
+  }
+  
+}

@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+    rabbitmq:
+        image: rabbitmq:3-management
+        container_name: rabbitmq
+        environment:
+            RABBITMQ_DEFAULT_USER: user
+            RABBITMQ_DEFAULT_PASS: password
+            RABBITMQ_LOG: debug
+        ports:
+            - '5672:5672'
+            - '15672:15672'
+        restart: always
+        networks:
+            - services-network
+
+    manager-app:
+        build:
+            context: ../manager
+            dockerfile: Dockerfile
+        container_name: manager-container
+        environment:
+            - PORT=3000
+            - RABBITMQ_HOST=rabbitmq
+            - MONGODB_URI=mongodb://mongo-primary:27017,mongo-secondary1:27017,mongo-secondary2:27017/hashcracker_db?replicaSet=rs0
+        ports:
+            - '3000:3000'
+        depends_on:
+            - rabbitmq
+            - mongo-init
+        restart: always
+        networks:
+            - services-network
+
+    worker-app:
+        build:
+            context: ../worker
+            dockerfile: Dockerfile
+        environment:
+            - PORT=3001
+            - RABBITMQ_HOST=rabbitmq
+        deploy:
+            replicas: 3
+        networks:
+            - services-network
+        depends_on:
+            - rabbitmq
+
+    mongo-primary:
+        image: mongo
+        container_name: mongo-primary
+        command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
+        ports:
+            - '27017:27017'
+        volumes:
+            - mongo_primary_data:/data/db
+        restart: always
+        networks:
+            - services-network
+
+    mongo-secondary1:
+        image: mongo
+        container_name: mongo-secondary1
+        command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
+        volumes:
+            - mongo_secondary1_data:/data/db
+        depends_on:
+            - mongo-primary
+        restart: always
+        networks:
+            - services-network
+
+    mongo-secondary2:
+        image: mongo
+        container_name: mongo-secondary2
+        command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
+        volumes:
+            - mongo_secondary2_data:/data/db
+        depends_on:
+            - mongo-primary
+        restart: always
+        networks:
+            - services-network
+
+    mongo-init:
+        image: mongo:5.0
+        container_name: mongo-init
+        depends_on:
+            - mongo-primary
+        entrypoint: >
+            bash -c "until mongo --host mongo-primary:27017 --eval 'print(\"waiting for mongo-primary\")'; do sleep 5; done &&
+                    mongo --host mongo-primary:27017 --eval 'rs.initiate({_id:\"rs0\",members:[{_id:0,host:\"mongo-primary:27017\"},{_id:1,host:\"mongo-secondary1:27017\"},{_id:2,host:\"mongo-secondary2:27017\"}]})'"
+        networks:
+            - services-network
+
+networks:
+    services-network:
+        driver: bridge
+
+volumes:
+    mongo_primary_data:
+    mongo_secondary1_data:
+    mongo_secondary2_data:
