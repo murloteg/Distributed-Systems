@@ -4,6 +4,7 @@ import { CrackResponseStatus } from 'src/external/types/CrackResponseStatus';
 
 export const ALLOWED_CRACK_REQUEST_STATUSES: CrackResponseStatus[] = [
   'PENDING',
+  'SENDING',
   'IN_PROGRESS',
   'READY',
   'ERROR',
@@ -34,6 +35,9 @@ export class CrackRequest extends Document {
 
   @Prop({ required: true, default: 0 })
   partsDone: number;
+
+  @Prop({ type: [Number], default: [] })
+  partsReceived: number[];
 
   @Prop({ type: [String], default: [] })
   results: string[];

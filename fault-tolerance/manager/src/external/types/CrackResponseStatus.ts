@@ -1,1 +1,6 @@
-export type CrackResponseStatus = 'PENDING' | 'IN_PROGRESS' | 'READY' | 'ERROR';
+export type CrackResponseStatus =
+  | 'PENDING'
+  | 'SENDING'
+  | 'IN_PROGRESS'
+  | 'READY'
+  | 'ERROR';

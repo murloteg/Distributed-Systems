@@ -54,12 +54,13 @@ export class ExternalManagerService {
       status: 'PENDING',
       workersCount: this.workersCount,
       partsDone: 0,
+      partsReceived: [],
       results: [],
     });
 
     try {
       await newRequest.save();
-      this.logger.log(`Request ${requestId} saved to DB with status PENDING`);
+      this.logger.log(`Request ${requestId} saved to DB with status PENDING.`);
     } catch (error) {
       this.logger.error(`Failed to save request ${requestId} to DB:`, error);
       throw new InternalServerErrorException(
@@ -68,25 +69,16 @@ export class ExternalManagerService {
     }
 
     const response: ResponseCrackDto = { requestId: requestId };
-    setTimeout(() => {
-      this.trySendTasksToQueue(newRequest);
-    }, 0);
-
     return response;
   }
 
-  private async trySendTasksToQueue(crackRequestDoc: CrackRequest) {
+  private async trySendTasksToQueue(
+    crackRequestDoc: CrackRequest,
+  ): Promise<boolean> {
     const { requestId, hash, maxLength, workersCount } = crackRequestDoc;
     this.logger.log(
-      `Manager trying to send tasks for request ${requestId} to queue`,
+      `Manager attempting to send tasks for request ${requestId} (status: ${crackRequestDoc.status})`,
     );
-
-    if (crackRequestDoc.status !== 'PENDING') {
-      this.logger.warn(
-        `Request ${requestId} is not in PENDING status (${crackRequestDoc.status}). Skipping task sending.`,
-      );
-      return;
-    }
 
     let totalWords = 0;
     try {
@@ -97,20 +89,11 @@ export class ExternalManagerService {
         throw new Error(`Calculated totalWords is invalid: ${totalWords}`);
       }
     } catch (e) {
-      this.logger.error(
-        `Failed to calculate totalWords or invalid result for ${requestId}:`,
-        e,
-      );
-      crackRequestDoc.status = 'ERROR';
-      await crackRequestDoc
-        .save()
-        .catch((err) =>
-          this.logger.error(
-            `Failed to save ERROR status for ${requestId}`,
-            err,
-          ),
-        );
-      return;
+      this.logger.error(`Failed to calculate totalWords for ${requestId}:`, e);
+      await this.crackRequestModel
+        .updateOne({ requestId }, { $set: { status: 'ERROR' } })
+        .exec();
+      return false;
     }
 
     let tasksSentSuccessfully = 0;
@@ -124,45 +107,32 @@ export class ExternalManagerService {
         alphabet: this.alphabet,
         workersCount: workersCount,
       };
-
       try {
         await this.taskClient.send('task_queue', requestToWorker).toPromise();
         this.logger.log(
-          `Task ${requestId} with partNumber ${partNumber} successfully sent/queued by client.`,
+          `Task ${requestId} part ${partNumber} successfully sent/queued by client.`,
         );
         tasksSentSuccessfully++;
       } catch (error) {
         this.logger.error(
-          `Failed to send task ${requestId} with partNumber ${partNumber} to queue: `,
+          `Failed to send task ${requestId} part ${partNumber} to queue: `,
           error.message || error,
         );
-        break;
+
+        return false;
       }
     }
 
-    if (
-      tasksSentSuccessfully === workersCount &&
-      crackRequestDoc.status === 'PENDING'
-    ) {
-      crackRequestDoc.status = 'IN_PROGRESS';
-      try {
-        await this.crackRequestModel
-          .updateOne(
-            { requestId: crackRequestDoc.requestId, status: 'PENDING' },
-            { $set: { status: 'IN_PROGRESS' } },
-          )
-          .exec();
-        this.logger.log(`Request ${requestId} status updated to IN_PROGRESS`);
-      } catch (dbError) {
-        this.logger.error(
-          `Failed to update status to IN_PROGRESS for task ${requestId}: `,
-          dbError,
-        );
-      }
-    } else if (tasksSentSuccessfully < workersCount) {
-      this.logger.warn(
-        `For request ${requestId}: only ${tasksSentSuccessfully}/${workersCount} tasks could be sent/queued. Status remains PENDING for retry.`,
+    if (tasksSentSuccessfully === workersCount) {
+      this.logger.log(
+        `All ${workersCount} tasks for ${requestId} sent successfully.`,
       );
+      return true;
+    } else {
+      this.logger.warn(
+        `Unexpected state: ${tasksSentSuccessfully} (tasksSentSuccessfully) != ${workersCount} (workersCount) for ${requestId}`,
+      );
+      return false;
     }
   }
 
@@ -170,11 +140,8 @@ export class ExternalManagerService {
     crackWorkerResponse: CrackWorkerResponse,
   ): Promise<void> {
     const { requestId, partNumber, answers } = crackWorkerResponse;
-    this.logger.log(
-      `
-        Processing result for ${requestId} with partNumber ${partNumber}. 
-        Answers: [${answers.toString()}]`,
-    );
+    this.logger.log(`
+        Processing result for ${requestId} with partNumber ${partNumber}. Answers: [${answers?.join(', ')}]`);
 
     try {
       const crackRequest = await this.crackRequestModel
@@ -188,37 +155,52 @@ export class ExternalManagerService {
         return;
       }
 
+      if (crackRequest.partsReceived.includes(partNumber)) {
+        this.logger.warn(
+          `Received duplicate result for ${requestId}, part ${partNumber}. Ignoring.`,
+        );
+        return;
+      }
+
       let requireSave = false;
+
+      crackRequest.partsReceived.push(partNumber);
+      requireSave = true;
+
       if (answers && answers.length > 0) {
         for (const answer of answers) {
           if (!crackRequest.results.includes(answer)) {
             crackRequest.results.push(answer);
-            requireSave = true;
           }
         }
       }
 
-      if (crackRequest.status === 'IN_PROGRESS') {
+      if (['PENDING', 'SENDING', 'IN_PROGRESS'].includes(crackRequest.status)) {
         crackRequest.partsDone += 1;
-        requireSave = true;
 
-        this.logger.log(
-          `Request ${requestId}: got new worker response (${crackRequest.partsDone}/${crackRequest.workersCount})`,
-        );
+        this.logger.log(`
+          Request ${requestId}: processed part ${partNumber}. Progress (${crackRequest.partsDone}/${crackRequest.workersCount})`);
 
         if (crackRequest.partsDone === crackRequest.workersCount) {
           crackRequest.status = 'READY';
           this.logger.log(`Request ${requestId} status updated to READY`);
         }
+      } else {
+        this.logger.warn(`
+            Request ${requestId}: Received part ${partNumber} while status is ${crackRequest.status}. Only updating partsReceived/results
+        `);
       }
 
       if (requireSave) {
         await crackRequest.save();
-        this.logger.log(`Request ${requestId} updated in DB`);
+        this.logger.log(
+          `Request ${requestId} updated in DB after processing part ${partNumber}.`,
+        );
       }
     } catch (error) {
       this.logger.error(
-        `Failed to update DB for request ${requestId} with partNumber ${partNumber}:`,
+        `
+        Failed to update DB for request ${requestId}, part ${partNumber}:`,
         error,
       );
       throw error;
@@ -266,38 +248,87 @@ export class ExternalManagerService {
     }
   }
 
-  @Cron(CronExpression.EVERY_30_SECONDS)
+  @Cron(CronExpression.EVERY_10_SECONDS)
   async retryPendingTasks() {
-    try {
-      this.logger.log(
-        '[Scheduler] Checking for PENDING tasks to retry sending...',
-      );
-      const pendingRequests = await this.crackRequestModel
-        .find({
-          status: 'PENDING',
-        })
-        .limit(10)
-        .exec();
+    this.logger.log('[Scheduler] Checking for tasks to process...');
+    let processedCount = 0;
+    const maxToProcess = 5;
 
-      if (pendingRequests.length === 0) {
-        this.logger.log('[Scheduler] No PENDING tasks found.');
-        return;
-      }
+    while (processedCount < maxToProcess) {
+      let requestToProcess: CrackRequest | null = null;
+      try {
+        requestToProcess = await this.crackRequestModel
+          .findOneAndUpdate(
+            { status: 'PENDING' },
+            { $set: { status: 'SENDING' } },
+            { new: true, sort: { createdAt: 1 } },
+          )
+          .exec();
 
-      this.logger.log(
-        `[Scheduler] Found ${pendingRequests.length} PENDING tasks. Retrying send...`,
-      );
-      for (const requestDoc of pendingRequests) {
+        if (!requestToProcess) {
+          if (processedCount === 0) {
+            this.logger.log('[Scheduler] No PENDING tasks found to process.');
+          }
+          break;
+        }
+
         this.logger.log(
-          `[Scheduler] Retrying task send for ${requestDoc.requestId}`,
+          `[Scheduler] Picked up task ${requestToProcess.requestId} for sending (status changed to SENDING).`,
         );
-        await this.trySendTasksToQueue(requestDoc);
-        const timeDelayInMsec = 200;
-        await new Promise((resolve) => setTimeout(resolve, timeDelayInMsec));
+        processedCount++;
+
+        const sendSuccess = await this.trySendTasksToQueue(requestToProcess);
+
+        let finalStatus: CrackResponseStatus;
+        if (sendSuccess) {
+          finalStatus = 'IN_PROGRESS';
+          this.logger.log(
+            `[Scheduler] Successfully sent tasks for ${requestToProcess.requestId}. Updating status to IN_PROGRESS.`,
+          );
+        } else {
+          finalStatus = 'PENDING';
+          this.logger.warn(
+            `[Scheduler] Failed to send tasks for ${requestToProcess.requestId}. Reverting status to PENDING.`,
+          );
+        }
+
+        await this.crackRequestModel
+          .updateOne(
+            { requestId: requestToProcess.requestId, status: 'SENDING' },
+            { $set: { status: finalStatus } },
+          )
+          .exec();
+
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      } catch (error) {
+        this.logger.error(
+          '[Scheduler] Error during task processing cycle:',
+          error,
+        );
+        if (requestToProcess) {
+          this.logger.warn(
+            `[Scheduler] Attempting to revert status to PENDING for ${requestToProcess.requestId} due to error.`,
+          );
+          await this.crackRequestModel
+            .updateOne(
+              { requestId: requestToProcess.requestId, status: 'SENDING' },
+              { $set: { status: 'PENDING' } },
+            )
+            .catch((revertError) =>
+              this.logger.error(
+                `[Scheduler] CRITICAL: Failed to revert status to PENDING for ${requestToProcess?.requestId}`,
+                revertError,
+              ),
+            );
+        }
+        break;
       }
-      this.logger.log('[Scheduler] Finished PENDING task retry cycle.');
-    } catch (error) {
-      this.logger.error('[Scheduler] Error during PENDING task retry:', error);
+    }
+
+    if (processedCount > 0) {
+      this.logger.log(
+        `[Scheduler] Finished processing cycle. Processed ${processedCount} tasks.`,
+      );
     }
   }
 }

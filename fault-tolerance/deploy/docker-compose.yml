@@ -23,7 +23,7 @@ services:
         environment:
             - PORT=3000
             - RABBITMQ_HOST=rabbitmq
-            - MONGODB_URI=mongodb://mongo-primary:27017,mongo-secondary1:27017,mongo-secondary2:27017/hashcracker_db?replicaSet=rs0
+            - MONGODB_URI=mongodb://mongo-node-1:27017,mongo-node-2:27017,mongo-node-3:27017/hashcracker_db?replicaSet=rs0
         ports:
             - '3000:3000'
         depends_on:
@@ -47,38 +47,38 @@ services:
         depends_on:
             - rabbitmq
 
-    mongo-primary:
+    mongo-node-1:
         image: mongo
-        container_name: mongo-primary
+        container_name: mongo-node-1
         command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
         ports:
             - '27017:27017'
         volumes:
-            - mongo_primary_data:/data/db
+            - mongo-node-1_data:/data/db
         restart: always
         networks:
             - services-network
 
-    mongo-secondary1:
+    mongo-node-2:
         image: mongo
-        container_name: mongo-secondary1
+        container_name: mongo-node-2
         command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
         volumes:
-            - mongo_secondary1_data:/data/db
+            - mongo-node-2_data:/data/db
         depends_on:
-            - mongo-primary
+            - mongo-node-1
         restart: always
         networks:
             - services-network
 
-    mongo-secondary2:
+    mongo-node-3:
         image: mongo
-        container_name: mongo-secondary2
+        container_name: mongo-node-3
         command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
         volumes:
-            - mongo_secondary2_data:/data/db
+            - mongo-node-3_data:/data/db
         depends_on:
-            - mongo-primary
+            - mongo-node-1
         restart: always
         networks:
             - services-network
@@ -87,10 +87,10 @@ services:
         image: mongo:5.0
         container_name: mongo-init
         depends_on:
-            - mongo-primary
+            - mongo-node-1
         entrypoint: >
-            bash -c "until mongo --host mongo-primary:27017 --eval 'print(\"waiting for mongo-primary\")'; do sleep 5; done &&
-                    mongo --host mongo-primary:27017 --eval 'rs.initiate({_id:\"rs0\",members:[{_id:0,host:\"mongo-primary:27017\"},{_id:1,host:\"mongo-secondary1:27017\"},{_id:2,host:\"mongo-secondary2:27017\"}]})'"
+            bash -c "until mongo --host mongo-node-1:27017 --eval 'print(\"waiting for mongo-node-1\")'; do sleep 5; done &&
+                    mongo --host mongo-node-1:27017 --eval 'rs.initiate({_id:\"rs0\",members:[{_id:0,host:\"mongo-node-1:27017\"},{_id:1,host:\"mongo-node-2:27017\"},{_id:2,host:\"mongo-node-3:27017\"}]})'"
         networks:
             - services-network
 
@@ -99,6 +99,6 @@ networks:
         driver: bridge
 
 volumes:
-    mongo_primary_data:
-    mongo_secondary1_data:
-    mongo_secondary2_data:
+    mongo-node-1_data:
+    mongo-node-2_data:
+    mongo-node-3_data:

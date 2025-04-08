@@ -99,9 +99,18 @@ export class WorkerService {
         : (task.partNumber + 1) * wordsCountPerWorker;
 
     const decodedWords = [];
+    const foundWordsSet = new Set<string>();
+
     for (let index = startPosition; index < endPosition; ++index) {
       const decodedWord = this.convertIndexToWord(index, task.alphabet);
       if (md5(decodedWord) === task.hash) {
+        if (!foundWordsSet.has(decodedWord)) {
+          decodedWords.push(decodedWord);
+          foundWordsSet.add(decodedWord);
+          this.logger.log(
+            ` Worker ${task.partNumber} found match: ${decodedWord}`,
+          );
+        }
         decodedWords.push(decodedWord);
       }
     }
