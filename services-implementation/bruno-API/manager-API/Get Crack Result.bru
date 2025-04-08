@@ -1,0 +1,15 @@
+meta {
+  name: Get Crack Result
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://localhost:3000/api/v1/hash/status?requestId=de80d02e-2a45-4b0c-bc29-28d7f206dad2
+  body: none
+  auth: none
+}
+
+params:query {
+  requestId: de80d02e-2a45-4b0c-bc29-28d7f206dad2
+}
