@@ -98,20 +98,35 @@ export class WorkerService {
         ? task.partCount
         : (task.partNumber + 1) * wordsCountPerWorker;
 
-    const decodedWords = [];
+    const decodedWords: string[] = [];
     const foundWordsSet = new Set<string>();
 
-    for (let index = startPosition; index < endPosition; ++index) {
-      const decodedWord = this.convertIndexToWord(index, task.alphabet);
-      if (md5(decodedWord) === task.hash) {
-        if (!foundWordsSet.has(decodedWord)) {
-          decodedWords.push(decodedWord);
-          foundWordsSet.add(decodedWord);
-          this.logger.log(
-            ` Worker ${task.partNumber} found match: ${decodedWord}`,
-          );
-        }
+    const total = endPosition - startPosition;
+    const progressSteps = [0.25, 0.5, 0.75, 1];
+    let nextProgressIndex = 0;
+
+    for (let index = 0; index < total; ++index) {
+      const globalIndex = startPosition + index;
+      const decodedWord = this.convertIndexToWord(globalIndex, task.alphabet);
+
+      if (md5(decodedWord) === task.hash && !foundWordsSet.has(decodedWord)) {
         decodedWords.push(decodedWord);
+        foundWordsSet.add(decodedWord);
+        this.logger.log(
+          ` Worker with partNumber ${task.partNumber} found match: ${decodedWord}`,
+        );
+      }
+
+      const progress = (index + 1) / total;
+      if (
+        nextProgressIndex < progressSteps.length &&
+        progress >= progressSteps[nextProgressIndex]
+      ) {
+        const percentage = progressSteps[nextProgressIndex] * 100;
+        this.logger.log(
+          `Worker with partNumber ${task.partNumber} progress: ${percentage.toFixed(0)}%`,
+        );
+        nextProgressIndex++;
       }
     }
     return decodedWords;

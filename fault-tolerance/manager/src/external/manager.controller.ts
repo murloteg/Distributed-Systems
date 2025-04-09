@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -37,16 +36,10 @@ export class ExternalManagerController {
     return await this.managerService.getCrackRequestStatus(requestId);
   }
 
-  @Get('status/first')
+  @Get('status/last')
   @HttpCode(HttpStatus.OK)
   async getFirstCrackResult(): Promise<CrackHashManagerResponse> {
-    return await this.managerService.getFirstCrackRequestStatus();
-  }
-
-  @Delete('clear/queue')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async clearTaskQueue(): Promise<void> {
-    await this.managerService.clearTaskQueue();
+    return await this.managerService.getLastCrackRequestStatus();
   }
 
   @EventPattern('worker_response_queue')
@@ -54,11 +47,9 @@ export class ExternalManagerController {
     @Payload() crackWorkerResponse: CrackWorkerResponse,
     @Ctx() context: RmqContext,
   ) {
-    this.logger.log(
-      `
+    this.logger.log(`
         Manager received result of task: ${crackWorkerResponse.requestId} 
-        with partNumber: ${crackWorkerResponse.partNumber}`,
-    );
+        with partNumber: ${crackWorkerResponse.partNumber}`);
     const channel = context.getChannelRef();
     const originalMessage = context.getMessage();
     try {
