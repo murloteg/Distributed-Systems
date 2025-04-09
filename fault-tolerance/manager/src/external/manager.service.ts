@@ -39,6 +39,20 @@ export class ExternalManagerService {
       );
   }
 
+  async getActiveTaskCount(): Promise<number> {
+    try {
+      const count = await this.crackRequestModel
+        .countDocuments({
+          status: { $in: ['SENDING', 'IN_PROGRESS'] },
+        })
+        .exec();
+      return count;
+    } catch (error) {
+      this.logger.error('Failed to count active tasks:', error);
+      return -1;
+    }
+  }
+
   async handleRequestToCrackHash(
     postCrackDto: PostCrackDto,
   ): Promise<ResponseCrackDto> {

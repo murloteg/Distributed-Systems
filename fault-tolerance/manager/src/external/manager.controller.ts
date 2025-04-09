@@ -20,6 +20,13 @@ export class ExternalManagerController {
   private readonly logger = new Logger(ExternalManagerController.name);
   constructor(private readonly managerService: ExternalManagerService) {}
 
+  @Get('stats')
+  @HttpCode(HttpStatus.OK)
+  async getStats(): Promise<{ activeTaskCount: number }> {
+    const count = await this.managerService.getActiveTaskCount();
+    return { activeTaskCount: count };
+  }
+
   @Post('crack')
   @HttpCode(HttpStatus.CREATED)
   async crackHash(
