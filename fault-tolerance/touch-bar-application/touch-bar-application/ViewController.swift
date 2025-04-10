@@ -3,22 +3,27 @@ import Cocoa
 extension NSTouchBarItem.Identifier {
     static let taskCount = NSTouchBarItem.Identifier("com.hashcracker.touchbar.taskCount")
     static let componentStatusGroup = NSTouchBarItem.Identifier("com.hashcracker.touchbar.componentStatusGroup")
-    static let stopButtonGroup = NSTouchBarItem.Identifier("com.hashcracker.touchbar.stopButtonGroup")
 }
 
-struct Component {
+class Component {
     let name: String
     let containerName: String
     let statusIconName: String
-    var isRunning: Bool = false
+    var isRunning: Bool
     var statusButton: NSButton?
-    var stopButton: NSButton?
+
+    init(name: String, containerName: String, statusIconName: String, isRunning: Bool = false) {
+        self.name = name
+        self.containerName = containerName
+        self.statusIconName = statusIconName
+        self.isRunning = isRunning
+    }
 }
 
 class ViewController: NSViewController, NSTouchBarDelegate {
     var statusUpdateTimer: Timer?
     let updateInterval: TimeInterval = 2.0
-    let proxyBaseUrl = "http://localhost:17871"
+    let proxyBaseUrl = "http://127.0.0.1:17871"
 
     var taskCountLabel: NSTextField?
     var components: [Component] = [
@@ -52,7 +57,6 @@ class ViewController: NSViewController, NSTouchBarDelegate {
             .flexibleSpace,
             .componentStatusGroup,
             .flexibleSpace,
-            .stopButtonGroup,
         ]
         return touchBar
     }
@@ -74,34 +78,23 @@ class ViewController: NSViewController, NSTouchBarDelegate {
 
             for i in 0..<components.count {
                 let image = NSImage(systemSymbolName: components[i].statusIconName, accessibilityDescription: components[i].name) ?? NSImage()
-                let button = NSButton(image: image, target: nil, action: nil)
+                image.isTemplate = true
+
+                let button = NSButton(image: image, target: self, action: #selector(stopComponent(_:)))
+                button.tag = i
                 button.bezelStyle = .regularSquare
                 button.isBordered = false
-                button.toolTip = components[i].containerName
+                button.toolTip = "Stop \(components[i].containerName)"
+                button.imageScaling = .scaleProportionallyDown
+
                 setStatusIndicatorColor(button: button, isRunning: components[i].isRunning)
+                button.isEnabled = components[i].isRunning
+
                 components[i].statusButton = button
                 stackView.addArrangedSubview(button)
             }
             item.view = stackView
             item.visibilityPriority = .high
-            return item
-
-        case .stopButtonGroup:
-            let item = NSCustomTouchBarItem(identifier: identifier)
-            let stackView = NSStackView()
-            stackView.orientation = .horizontal
-            stackView.spacing = 5
-
-            for i in 0..<components.count {
-                let button = NSButton(title: "Stop \(components[i].name)", target: self, action: #selector(stopComponent(_:)))
-                button.tag = i
-                button.bezelStyle = .rounded
-                button.bezelColor = NSColor.systemRed.withAlphaComponent(0.6)
-                components[i].stopButton = button
-                stackView.addArrangedSubview(button)
-            }
-            item.view = stackView
-            item.visibilityPriority = .low
             return item
 
         default:
@@ -124,7 +117,10 @@ class ViewController: NSViewController, NSTouchBarDelegate {
     }
 
     func fetchTaskCount() {
-         guard let url = URL(string: "http://localhost:3000/api/v1/hash/stats") else { return }
+         guard let url = URL(string: "http://127.0.0.1:3000/api/v1/hash/stats") else {
+            print("Invalid URL for task count")
+            return
+         }
          let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
              var countStr = "- "
              if let error = error { print("Error fetching task count: \(error.localizedDescription)") }
@@ -133,6 +129,7 @@ class ViewController: NSViewController, NSTouchBarDelegate {
                  countStr = "\(count)"
                  print("Fetched active task count: \(count)")
              } else { print("Failed to parse task count JSON or data is missing") }
+
              DispatchQueue.main.async { self?.taskCountLabel?.stringValue = "Tasks: \(countStr)" }
          }
          task.resume()
@@ -153,17 +150,17 @@ class ViewController: NSViewController, NSTouchBarDelegate {
 
              var needsUIUpdate = false
              var receivedStatuses: [String: String] = [:]
+             var hadError = false
 
              if let error = error {
                  print("Error fetching proxy statuses: \(error.localizedDescription)")
-                 for i in 0..<self.components.count {
-                     if self.components[i].isRunning {
-                         self.components[i].isRunning = false
-                         needsUIUpdate = true
-                     }
-                 }
+                 hadError = true
              } else if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
                  print("HTTP Error fetching proxy statuses: \(httpResponse.statusCode)")
+                 hadError = true
+             }
+
+             if hadError {
                  for i in 0..<self.components.count {
                      if self.components[i].isRunning {
                          self.components[i].isRunning = false
@@ -172,8 +169,8 @@ class ViewController: NSViewController, NSTouchBarDelegate {
                  }
              } else if let data = data {
                  if let statuses = try? JSONDecoder().decode([String: String].self, from: data) {
-                     print("Received statuses from proxy: \(statuses.count) items")
-                     receivedStatuses = statuses
+                    print("Received statuses from proxy: \(statuses.count) items")
+                    receivedStatuses = statuses
                      for i in 0..<self.components.count {
                          let containerName = self.components[i].containerName
                          let currentProxyStatus = receivedStatuses[containerName]?.lowercased() ?? "stopped"
@@ -186,7 +183,7 @@ class ViewController: NSViewController, NSTouchBarDelegate {
                          }
                      }
                  } else {
-                     print("Failed to decode JSON statuses from proxy")
+                     print("Failed to decode JSON statuses from proxy. Assuming all stopped.")
                      for i in 0..<self.components.count {
                          if self.components[i].isRunning {
                              self.components[i].isRunning = false
@@ -210,8 +207,8 @@ class ViewController: NSViewController, NSTouchBarDelegate {
          for i in 0..<components.count {
              if let button = components[i].statusButton {
                  setStatusIndicatorColor(button: button, isRunning: components[i].isRunning)
+                 button.isEnabled = components[i].isRunning
              }
-             components[i].stopButton?.isEnabled = components[i].isRunning
          }
      }
 
@@ -221,23 +218,33 @@ class ViewController: NSViewController, NSTouchBarDelegate {
 
     @objc func stopComponent(_ sender: NSButton) {
         let index = sender.tag
-        guard index >= 0 && index < components.count else { return }
-        let containerName = components[index].containerName
+        guard index >= 0 && index < components.count else {
+            print("Error: Invalid button tag \(index)")
+            return
+        }
+
+        let component = components[index]
+        let containerName = component.containerName
         print("UI Action: Attempting to stop container via proxy: \(containerName)")
 
         sender.isEnabled = false
+        sender.contentTintColor = .systemGray
 
-        DispatchQueue.global(qos: .background).async { [weak self] in
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.stopContainerViaProxy(containerName: containerName) { success in
                  DispatchQueue.main.async {
-                     sender.isEnabled = true
                      if success {
-                         print("Stop command successful for \(containerName), triggering status update.")
-                          DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                              self?.updateComponentStatusesViaProxy()
-                          }
+                         print("Stop command potentially successful for \(containerName). Triggering status update.")
+                         if let strongSelf = self {
+                            strongSelf.components[index].isRunning = false
+                            strongSelf.updateStatusIndicators()
+                         }
                      } else {
-                         print("Stop command failed for \(containerName).")
+                         print("Stop command failed or status did not change for \(containerName). Re-enabling button.")
+                         sender.isEnabled = true
+                          if let strongSelf = self, let button = strongSelf.components[index].statusButton {
+                             strongSelf.setStatusIndicatorColor(button: button, isRunning: strongSelf.components[index].isRunning)
+                         }
                      }
                  }
             }
@@ -271,13 +278,8 @@ class ViewController: NSViewController, NSTouchBarDelegate {
                  print("Error sending stop command via proxy: \(error.localizedDescription)")
              } else if let httpResponse = response as? HTTPURLResponse {
                  if (200...299).contains(httpResponse.statusCode) {
-                     if let data = data, let json = try? JSONDecoder().decode([String: String].self, from: data) {
-                         print("Proxy response for stop \(containerName): \(json)")
-                         success = (json["status"]?.lowercased() != "running")
-                     } else {
-                         print("Stop command sent, but proxy response parsing failed. Assuming success based on HTTP code.")
-                         success = true
-                     }
+                     print("Proxy accepted stop command for \(containerName) with status \(httpResponse.statusCode)")
+                     success = true
                  } else {
                      print("HTTP Error from proxy stop command: \(httpResponse.statusCode)")
                  }
