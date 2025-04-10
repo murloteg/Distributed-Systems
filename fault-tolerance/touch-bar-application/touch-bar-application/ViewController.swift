@@ -2,7 +2,13 @@ import Cocoa
 
 extension NSTouchBarItem.Identifier {
     static let taskCount = NSTouchBarItem.Identifier("com.hashcracker.touchbar.taskCount")
+    static let lastTaskProgress = NSTouchBarItem.Identifier("com.hashcracker.touchbar.lastTaskProgress")
     static let componentStatusGroup = NSTouchBarItem.Identifier("com.hashcracker.touchbar.componentStatusGroup")
+}
+
+struct TaskStatusResponse: Decodable {
+    let status: String
+    // let data: [String]?
 }
 
 class Component {
@@ -21,11 +27,26 @@ class Component {
 }
 
 class ViewController: NSViewController, NSTouchBarDelegate {
+    // Таймеры и интервалы
     var statusUpdateTimer: Timer?
     let updateInterval: TimeInterval = 2.0
-    let proxyBaseUrl = "http://127.0.0.1:17871"
+    var progressAnimationTimer: Timer?
+    var progressAnimationStartTime: Date?
+    let progressAnimationDuration: TimeInterval = 10.0
+    let progressTargetValue: Double = 1
 
+    // URL Endpoints
+    let proxyBaseUrl = "http://127.0.0.1:17871"
+    let lastTaskStatusUrl = "http://127.0.0.1:3000/api/v1/hash/status/last"
+    let taskCountUrl = "http://127.0.0.1:3000/api/v1/hash/stats"
+
+    // UI Элементы Touch Bar
     var taskCountLabel: NSTextField?
+    var lastTaskContainerView: NSView?
+    var lastTaskSlider: NSSlider?
+
+    // Данные и состояние
+    var lastTaskStatus: String?
     var components: [Component] = [
         Component(name: "Mgr", containerName: "manager-container", statusIconName: "display"),
         Component(name: "W1", containerName: "deploy-worker-app-1", statusIconName: "wrench.and.screwdriver"),
@@ -39,7 +60,6 @@ class ViewController: NSViewController, NSTouchBarDelegate {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        self.view.frame = NSRect(x: 0, y: 0, width: 400, height: 200)
     }
 
     override func viewDidAppear() {
@@ -49,11 +69,22 @@ class ViewController: NSViewController, NSTouchBarDelegate {
         startStatusUpdates()
     }
 
+    override func viewWillDisappear() {
+        statusUpdateTimer?.invalidate()
+        statusUpdateTimer = nil
+        progressAnimationTimer?.invalidate()
+        progressAnimationTimer = nil
+        print("Status and Animation timers invalidated")
+        super.viewWillDisappear()
+    }
+
     override func makeTouchBar() -> NSTouchBar? {
         let touchBar = NSTouchBar()
         touchBar.delegate = self
         touchBar.defaultItemIdentifiers = [
             .taskCount,
+            .fixedSpaceSmall,
+            .lastTaskProgress,
             .flexibleSpace,
             .componentStatusGroup,
             .flexibleSpace,
@@ -70,27 +101,64 @@ class ViewController: NSViewController, NSTouchBarDelegate {
             item.view = taskCountLabel!
             return item
 
+        case .lastTaskProgress:
+            let item = NSCustomTouchBarItem(identifier: identifier)
+            let containerView = NSView()
+            containerView.translatesAutoresizingMaskIntoConstraints = false
+            containerView.wantsLayer = true
+            containerView.layer?.cornerRadius = 4
+
+            let slider = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
+            slider.translatesAutoresizingMaskIntoConstraints = false
+            slider.sliderType = .linear
+            slider.isEnabled = false
+
+            if #available(macOS 10.12.2, *) {
+                slider.trackFillColor = NSColor.lightGray.withAlphaComponent(0.8)
+            }
+            containerView.addSubview(slider)
+
+            NSLayoutConstraint.activate([
+                containerView.widthAnchor.constraint(equalToConstant: 160),
+                containerView.heightAnchor.constraint(equalToConstant: 18),
+
+                slider.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 2),
+                slider.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -2),
+                slider.centerYAnchor.constraint(equalTo: containerView.centerYAnchor)
+            ])
+
+            containerView.layer?.backgroundColor = NSColor.darkGray.withAlphaComponent(0.6).cgColor
+            slider.doubleValue = 0.0
+
+            self.lastTaskContainerView = containerView
+            self.lastTaskSlider = slider
+            item.view = containerView
+
+            return item
+
         case .componentStatusGroup:
             let item = NSCustomTouchBarItem(identifier: identifier)
             let stackView = NSStackView()
             stackView.orientation = .horizontal
             stackView.spacing = 8
 
+            // Создаем кнопки-иконки для каждого компонента
             for i in 0..<components.count {
-                let image = NSImage(systemSymbolName: components[i].statusIconName, accessibilityDescription: components[i].name) ?? NSImage()
+                let component = components[i]
+                let image = NSImage(systemSymbolName: component.statusIconName, accessibilityDescription: component.name) ?? NSImage()
                 image.isTemplate = true
 
                 let button = NSButton(image: image, target: self, action: #selector(stopComponent(_:)))
                 button.tag = i
                 button.bezelStyle = .regularSquare
                 button.isBordered = false
-                button.toolTip = "Stop \(components[i].containerName)"
+                button.toolTip = "Stop \(component.containerName)"
                 button.imageScaling = .scaleProportionallyDown
 
-                setStatusIndicatorColor(button: button, isRunning: components[i].isRunning)
-                button.isEnabled = components[i].isRunning
+                setStatusIndicatorColor(button: button, isRunning: component.isRunning)
+                button.isEnabled = component.isRunning
 
-                components[i].statusButton = button
+                component.statusButton = button
                 stackView.addArrangedSubview(button)
             }
             item.view = stackView
@@ -104,21 +172,24 @@ class ViewController: NSViewController, NSTouchBarDelegate {
 
     func startStatusUpdates() {
         statusUpdateTimer?.invalidate()
+        progressAnimationTimer?.invalidate()
         updateAllStatuses()
         statusUpdateTimer = Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { [weak self] _ in
             self?.updateAllStatuses()
         }
-         RunLoop.main.add(statusUpdateTimer!, forMode: .common)
+        RunLoop.main.add(statusUpdateTimer!, forMode: .common)
     }
 
+    // Вызывает все функции обновления статусов
     func updateAllStatuses() {
         fetchTaskCount()
         updateComponentStatusesViaProxy()
+        fetchLastTaskStatus()
     }
 
     func fetchTaskCount() {
-         guard let url = URL(string: "http://127.0.0.1:3000/api/v1/hash/stats") else {
-            print("Invalid URL for task count")
+         guard let url = URL(string: taskCountUrl) else {
+            print("Invalid URL for task count: \(taskCountUrl)")
             return
          }
          let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
@@ -127,20 +198,17 @@ class ViewController: NSViewController, NSTouchBarDelegate {
              else if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) { print("HTTP Error fetching task count: \(httpResponse.statusCode)") }
              else if let data = data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let count = json["activeTaskCount"] as? Int {
                  countStr = "\(count)"
-                 print("Fetched active task count: \(count)")
              } else { print("Failed to parse task count JSON or data is missing") }
-
              DispatchQueue.main.async { self?.taskCountLabel?.stringValue = "Tasks: \(countStr)" }
          }
          task.resume()
      }
 
-     func updateComponentStatusesViaProxy() {
+    func updateComponentStatusesViaProxy() {
          guard let url = URL(string: "\(proxyBaseUrl)/api/v1/status-check") else {
              print("Invalid URL for proxy status check")
              return
          }
-
          var request = URLRequest(url: url)
          request.httpMethod = "GET"
          request.timeoutInterval = updateInterval - 0.5
@@ -149,7 +217,6 @@ class ViewController: NSViewController, NSTouchBarDelegate {
              guard let self = self else { return }
 
              var needsUIUpdate = false
-             var receivedStatuses: [String: String] = [:]
              var hadError = false
 
              if let error = error {
@@ -169,17 +236,16 @@ class ViewController: NSViewController, NSTouchBarDelegate {
                  }
              } else if let data = data {
                  if let statuses = try? JSONDecoder().decode([String: String].self, from: data) {
-                    print("Received statuses from proxy: \(statuses.count) items")
-                    receivedStatuses = statuses
+                    // Обновляем статус каждого компонента
                      for i in 0..<self.components.count {
-                         let containerName = self.components[i].containerName
-                         let currentProxyStatus = receivedStatuses[containerName]?.lowercased() ?? "stopped"
+                         let component = self.components[i]
+                         let currentProxyStatus = statuses[component.containerName]?.lowercased() ?? "stopped"
                          let isNowRunning = (currentProxyStatus == "running")
 
-                         if self.components[i].isRunning != isNowRunning {
+                         if component.isRunning != isNowRunning {
                              self.components[i].isRunning = isNowRunning
                              needsUIUpdate = true
-                             print("Status changed for \(containerName): \(isNowRunning ? "Running" : "Stopped")")
+                             print("Status changed for \(component.containerName): \(isNowRunning ? "Running" : "Stopped")")
                          }
                      }
                  } else {
@@ -202,19 +268,142 @@ class ViewController: NSViewController, NSTouchBarDelegate {
          task.resume()
      }
 
-     func updateStatusIndicators() {
-         print("Updating status indicators UI")
-         for i in 0..<components.count {
-             if let button = components[i].statusButton {
-                 setStatusIndicatorColor(button: button, isRunning: components[i].isRunning)
-                 button.isEnabled = components[i].isRunning
-             }
-         }
-     }
+    func fetchLastTaskStatus() {
+        guard let url = URL(string: lastTaskStatusUrl) else {
+            print("Invalid URL for last task status: \(lastTaskStatusUrl)")
+            DispatchQueue.main.async { [weak self] in
+                self?.updateLastTaskProgressUI(newStatus: "ERROR", errorOccurred: true)
+            }
+            return
+        }
 
-     func setStatusIndicatorColor(button: NSButton, isRunning: Bool) {
-         button.contentTintColor = isRunning ? .systemGreen : .systemRed
-     }
+        let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            var finalStatus = "ERROR"
+            var fetchError = true
+
+            if let error = error {
+                print("Error fetching last task status: \(error.localizedDescription)")
+            } else if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                print("HTTP Error fetching last task status: \(httpResponse.statusCode)")
+            } else if let data = data {
+                let decoder = JSONDecoder()
+                decoder.userInfo[CodingUserInfoKey(rawValue: "failOnUnknownProperties")!] = false
+                if let decodedResponse = try? decoder.decode(TaskStatusResponse.self, from: data) {
+                    finalStatus = decodedResponse.status.uppercased()
+                    fetchError = false
+                } else {
+                    print("Failed to parse last task status JSON")
+                }
+            }
+
+            DispatchQueue.main.async {
+                self?.updateLastTaskProgressUI(newStatus: finalStatus, errorOccurred: fetchError)
+            }
+        }
+        task.resume()
+    }
+
+    func updateLastTaskProgressUI(newStatus: String, errorOccurred: Bool = false) {
+        guard let container = self.lastTaskContainerView,
+              let slider = self.lastTaskSlider else { return }
+
+        let previousStatus = self.lastTaskStatus
+        self.lastTaskStatus = newStatus
+
+        if previousStatus == "IN_PROGRESS" && newStatus != "IN_PROGRESS" {
+            progressAnimationTimer?.invalidate()
+            progressAnimationTimer = nil
+            progressAnimationStartTime = nil
+            print("Progress animation stopped (status change)")
+        }
+
+        var targetValue: Double = 0.0
+        var targetBackgroundColor: NSColor = .darkGray.withAlphaComponent(0.6)
+
+        switch newStatus {
+        case "PENDING":
+            targetValue = 0.0
+            targetBackgroundColor = .darkGray.withAlphaComponent(0.6)
+        case "IN_PROGRESS":
+            targetValue = slider.doubleValue
+            targetBackgroundColor = .systemYellow.withAlphaComponent(0.6)
+            if progressAnimationTimer == nil {
+                 print("Starting progress animation...")
+                 progressAnimationStartTime = Date()
+                 if previousStatus != "IN_PROGRESS" { slider.doubleValue = 0.0 }
+                 progressAnimationTimer = Timer.scheduledTimer(timeInterval: 0.1, target: self, selector: #selector(animateProgress(_:)), userInfo: nil, repeats: true)
+                 RunLoop.main.add(progressAnimationTimer!, forMode: .common)
+             }
+        case "READY":
+            targetValue = 1.0
+            targetBackgroundColor = .systemGreen.withAlphaComponent(0.6)
+        case "ERROR":
+            targetValue = 1.0
+            targetBackgroundColor = .systemRed.withAlphaComponent(0.6)
+        default:
+            targetValue = 0.0
+            targetBackgroundColor = .darkGray.withAlphaComponent(0.6)
+            print("Unknown task status received: \(newStatus)")
+        }
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.3
+            context.allowsImplicitAnimation = true
+            container.layer?.backgroundColor = targetBackgroundColor.cgColor
+        }, completionHandler: nil)
+
+        if newStatus != "IN_PROGRESS" {
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.2
+                context.allowsImplicitAnimation = true
+                slider.doubleValue = targetValue
+            }, completionHandler: nil)
+        }
+    }
+
+    @objc func animateProgress(_ timer: Timer) {
+        guard let slider = self.lastTaskSlider,
+              let startTime = self.progressAnimationStartTime,
+              self.lastTaskStatus == "IN_PROGRESS"
+        else {
+            timer.invalidate(); progressAnimationTimer = nil; progressAnimationStartTime = nil
+            print("Progress animation stopped unexpectedly.")
+            return
+        }
+
+        let elapsedTime = Date().timeIntervalSince(startTime)
+        let animationProgress = min(elapsedTime / progressAnimationDuration, 1.0)
+        let currentValue = animationProgress * progressTargetValue
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.1
+            context.allowsImplicitAnimation = true
+            slider.doubleValue = currentValue
+        }, completionHandler: nil)
+
+        if elapsedTime >= progressAnimationDuration {
+            timer.invalidate(); progressAnimationTimer = nil; progressAnimationStartTime = nil
+            NSAnimationContext.runAnimationGroup({ context in
+                 context.duration = 0.1
+                 context.allowsImplicitAnimation = true
+                 slider.doubleValue = progressTargetValue
+             }, completionHandler: nil)
+            print("Progress animation finished.")
+        }
+    }
+
+    func updateStatusIndicators() {
+        for i in 0..<components.count {
+            if let button = components[i].statusButton {
+                setStatusIndicatorColor(button: button, isRunning: components[i].isRunning)
+                button.isEnabled = components[i].isRunning
+            }
+        }
+    }
+
+    func setStatusIndicatorColor(button: NSButton, isRunning: Bool) {
+        button.contentTintColor = isRunning ? .systemGreen : .systemRed
+    }
 
     @objc func stopComponent(_ sender: NSButton) {
         let index = sender.tag
@@ -233,16 +422,18 @@ class ViewController: NSViewController, NSTouchBarDelegate {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.stopContainerViaProxy(containerName: containerName) { success in
                  DispatchQueue.main.async {
+                      guard let strongSelf = self else { return }
                      if success {
-                         print("Stop command potentially successful for \(containerName). Triggering status update.")
-                         if let strongSelf = self {
-                            strongSelf.components[index].isRunning = false
-                            strongSelf.updateStatusIndicators()
+                         print("Stop command potentially successful for \(containerName). Updating UI.")
+                         if let button = strongSelf.components[index].statusButton {
+                             strongSelf.components[index].isRunning = false
+                             strongSelf.setStatusIndicatorColor(button: button, isRunning: false)
+                             button.isEnabled = false
                          }
                      } else {
-                         print("Stop command failed or status did not change for \(containerName). Re-enabling button.")
-                         sender.isEnabled = true
-                          if let strongSelf = self, let button = strongSelf.components[index].statusButton {
+                         print("Stop command failed or status did not change for \(containerName). Reverting UI.")
+                         if let button = strongSelf.components[index].statusButton {
+                             button.isEnabled = strongSelf.components[index].isRunning
                              strongSelf.setStatusIndicatorColor(button: button, isRunning: strongSelf.components[index].isRunning)
                          }
                      }
@@ -283,16 +474,11 @@ class ViewController: NSViewController, NSTouchBarDelegate {
                  } else {
                      print("HTTP Error from proxy stop command: \(httpResponse.statusCode)")
                  }
+             } else {
+                 print("Stop command sent, but no valid response or error received.")
              }
              completion(success)
          }
          task.resume()
     }
-
-     override func viewWillDisappear() {
-         statusUpdateTimer?.invalidate()
-         statusUpdateTimer = nil
-         print("Status timer invalidated")
-         super.viewWillDisappear()
-     }
 }
