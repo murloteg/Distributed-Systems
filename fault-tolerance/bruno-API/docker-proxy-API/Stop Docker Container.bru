@@ -1,0 +1,17 @@
+meta {
+  name: Stop Docker Container
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://localhost:17871/api/v1/stop-container
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    name: "sadasd"
+  }
+}

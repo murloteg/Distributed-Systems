@@ -1,0 +1,10 @@
+[
+	"rabbitmq",
+	"mongo-node-1",
+	"mongo-node-2",
+	"mongo-node-3",
+	"deploy-worker-app-1",
+	"deploy-worker-app-2",
+	"deploy-worker-app-3",
+	"manager-container"
+]
